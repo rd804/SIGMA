@@ -5,7 +5,7 @@ __pycache__/
 /models_SR
 data/*
 # C extensions
-
+start_jupyter_server.sh
 *.txt
 model_CR
 model_CR_1

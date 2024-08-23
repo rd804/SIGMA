@@ -23,6 +23,8 @@ import pickle
 import sys
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
+from scipy.stats import rv_histogram
+
 #os.environ["CUDA_VISIBLE_DEVICES"]='2'
 
 parser = argparse.ArgumentParser()
@@ -30,7 +32,8 @@ parser.add_argument('--n_sig',type=int , default=1000)
 parser.add_argument('--try_', type=int, default=0)
 parser.add_argument('--epochs', type=int, default=100)
 parser.add_argument('--batch_size', type=int, default=256)
-parser.add_argument('--frequencies', type=int, default=3)
+parser.add_argument('--time_frequencies', type=int, default=3)
+parser.add_argument('--context_frequencies', type=int, default=10)
 parser.add_argument('--x_train', type=str, default='CR')
 parser.add_argument('--ensemble_size', type=int, default=50)
 parser.add_argument('--num_blocks', type=int, default=6)
@@ -40,10 +43,15 @@ parser.add_argument('--seed', type=int, default=1, help='seed')
 parser.add_argument('--shuffle_split', action='store_true', help='if shuffle split is used')
 parser.add_argument('--split', type=int, default=0, help='split number')
 parser.add_argument('--data_dir', type=str, default='data/extended1', help='data directory')
-parser.add_argument('--context_embedding', action='store_true', help='if time embedding is used')
 parser.add_argument('--device', type=str, default='cuda:1', help='device')
 parser.add_argument('--baseline', action='store_true', help='if baseline is used')
+
+parser.add_argument('--context_embedding', action='store_true', help='if time embedding is used')
 parser.add_argument('--non_linear_context', action='store_true', help='if non linear context is used')
+parser.add_argument('--scaled_mass', action='store_true', help='if mass is scaled')
+parser.add_argument('--sample_interpolated', action='store_true', help='if interpolated samples are generated')
+parser.add_argument('--higher_mass', default=3.8, type=float, help='higher mass')
+parser.add_argument('--lower_mass', default=3.2, type=float, help='lower mass')
 #parser.add_argument('--try', type=int, default=0)
 
 parser.add_argument('--wandb', action='store_true', help='if wandb is used')
@@ -148,14 +156,14 @@ if args.context_embedding:
 
     x_train[:,0] = np.digitize(x_train[:,0], context_bins)
 
-# minmax mass to be between -1 and 1
-from sklearn.preprocessing import MinMaxScaler
-scaler = MinMaxScaler(feature_range=(-1,1))
-x_train[:,0] = scaler.fit_transform(x_train[:,0].reshape(-1,1)).reshape(-1)
+if args.scaled_mass:
+    from sklearn.preprocessing import MinMaxScaler
+    scaler = MinMaxScaler(feature_range=(-1,1))
+    x_train[:,0] = scaler.fit_transform(x_train[:,0].reshape(-1,1)).reshape(-1)
 
-# save scaler
-with open(save_path+'scaler.pkl', 'wb') as f:
-    pickle.dump(scaler, f)
+    # save scaler
+    with open(save_path+'scaler.pkl', 'wb') as f:
+        pickle.dump(scaler, f)
 
 
 
@@ -165,7 +173,7 @@ if not args.shuffle_split:
     #data_train = x_train   
     #data_train, data_val = train_test_split(x_train, test_size=0.5, random_state=args.seed)
 else:
-    ss_data = ShuffleSplit(n_splits=20, test_size=0.5, random_state=22)
+    ss_data = ShuffleSplit(n_splits=20, test_size=0.15, random_state=22)
 
     print(f'doing a shuffle split with split number {args.split}')
 
@@ -182,8 +190,9 @@ if args.baseline:
 x_test = preprocess_params_transform(_x_test, pre_parameters_cpu)
 x_SR = preprocess_params_transform(SR_data, pre_parameters_cpu)
 
-x_test[:,0] = scaler.transform(x_test[:,0].reshape(-1,1)).reshape(-1)
-x_SR[:,0] = scaler.transform(x_SR[:,0].reshape(-1,1)).reshape(-1)
+if args.scaled_mass:
+    x_test[:,0] = scaler.transform(x_test[:,0].reshape(-1,1)).reshape(-1)
+    x_SR[:,0] = scaler.transform(x_SR[:,0].reshape(-1,1)).reshape(-1)
 
 if args.context_embedding:
     x_train[:,0] = np.digitize(x_train[:,0], context_bins)
@@ -211,24 +220,27 @@ for i in range(1):
 
     if args.context_embedding:
         print('context embedding sinusoidal')
-        model = Discrete_Conditional_ResNet(context_features=1, 
+        model = Discrete_Conditional_ResNet(context_features=1,
+                            frequencies=args.time_frequencies, 
                             input_dim=n_features, 
                             device=device, 
-                            hidden_dim=args.hidden_dim, num_blocks=args.num_blocks,
+                            hidden_dim=args.hidden_dim, 
+                            num_blocks=args.num_blocks,
                             use_batch_norm=True, 
                             dropout_probability=0.2, 
-                            context_embed=SinusoidalPosEmb(dim=32,theta=100),
+                            context_embed=SinusoidalPosEmb(dim=args.context_frequencies,theta=100),
                             non_linear_context=args.non_linear_context)
        # print(model)
     else:
         print('no context embedding')
-        model = Conditional_ResNet(frequencies=args.frequencies, 
+        model = Conditional_ResNet(context_frequencies=args.context_frequencies,
+                                   time_frequencies=args.time_frequencies, 
                                    context_features=1, 
-                                input_dim=n_features, device=device,
-                                hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
-                                use_batch_norm=True, 
-                                dropout_probability=0.2,
-                                non_linear_context=args.non_linear_context)
+                                    input_dim=n_features, device=device,
+                                    hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
+                                    use_batch_norm=True, 
+                                    dropout_probability=0.2,
+                                    non_linear_context=args.non_linear_context)
 
                             
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
@@ -264,20 +276,23 @@ logprob_epoch = np.array(logprob_epoch)
 lowest_epochs = logprob_epoch[log_prob_mean_sorted[:10].tolist()]
 
 print('lowest epochs', lowest_epochs)
-SR_mass = scaler.transform(SR_data[:,0].reshape(-1,1))
-mass = torch.from_numpy(SR_mass).to(device).float()
-data = torch.from_numpy(SR_data[:,1:-1]).to(device).float()
-noise1 = torch.randn_like(data).to(device).float()
-noise2 = torch.randn_like(data).to(device).float()
-noise3 = torch.randn_like(data).to(device).float()
 
-noise = torch.cat([noise1, noise2], dim=0)
-noise = torch.cat([noise, noise3], dim=0)
-mass = torch.cat([mass, mass, mass], dim=0)
-#mass = scaler
+SR_mass = SR_data[:,0]
+if args.scaled_mass:
+    SR_mass = scaler.transform(SR_data[:,0].reshape(-1,1))
+SR_hist = np.histogram(SR_mass, bins=60, density=True)
+SR_density = rv_histogram(SR_hist)
+
+noise = torch.randn(3*len(SR_mass), n_features).to(device).float()
+mass_samples_SR = SR_density.rvs(size=len(noise))
+mass_samples_SR = mass_samples_SR.reshape(-1,1)
+mass_samples_SR = torch.from_numpy(mass_samples_SR).to(device).float()
+
+print('mass_samples_SR', mass_samples_SR.shape)
+
 
 if args.context_embedding:
-    mass_numpy = mass.cpu().detach().numpy()
+    mass_numpy = mass_samples_SR.cpu().detach().numpy()
     digitized_mass = np.digitize(mass_numpy, context_bins)
     digitized_mass = torch.from_numpy(digitized_mass).to(device).float()
 
@@ -286,23 +301,100 @@ mini_batch_length = len(noise)//10
 ensembled_samples = []
 ensembled_mass = []
 
+start_time = time.time()
 #lowest_epochs = np.arange(0,10,1)
 for i,epoch in enumerate(lowest_epochs):
     model.load_state_dict(torch.load(f'{save_path}model_epoch_{epoch}.pth'))
     noise_batch = noise[i*mini_batch_length:(i+1)*mini_batch_length]
     if args.context_embedding:
         digitized_mass_batch = digitized_mass[i*mini_batch_length:(i+1)*mini_batch_length]
-        mass_batch = mass[i*mini_batch_length:(i+1)*mini_batch_length]
-        samples = sample(model, noise_batch, digitized_mass_batch, start=0.0, end=1.0)
+        mass_batch = mass_samples_SR[i*mini_batch_length:(i+1)*mini_batch_length]
+        _samples = sample(model, noise_batch, digitized_mass_batch, start=0.0, end=1.0)
     else:
-        mass_batch = mass[i*mini_batch_length:(i+1)*mini_batch_length] 
-        samples = sample(model, noise_batch, mass_batch, start=0.0, end=1.0)
-    ensembled_samples.append(samples)
+        mass_batch = mass_samples_SR[i*mini_batch_length:(i+1)*mini_batch_length] 
+        _samples = sample(model, noise_batch, mass_batch, start=0.0, end=1.0)
+    ensembled_samples.append(_samples)
     ensembled_mass.append(mass_batch)
 
-
-
 print('deleting models')
+mass = torch.cat(ensembled_mass, dim=0)
+_samples = torch.cat(ensembled_samples, dim=0)
+_samples = torch.concat([mass, _samples], axis=1)
+samples = torch.concat([_samples, torch.ones(_samples.shape[0],1).to(device)], axis=1)
+samples_inverse = inverse_transform(samples, pre_parameters).cpu().detach().numpy()
+if args.scaled_mass:
+    samples_inverse[:,0] = scaler.inverse_transform(samples_inverse[:,0].reshape(-1,1)).reshape(-1)
+
+end_time = time.time()
+print('time to sample', end_time-start_time)
+
+if args.sample_interpolated:
+
+    if args.scaled_mass:
+        max_mass = scaler.transform(np.array([[args.higher_mass]]))[0][0]
+        min_mass = scaler.transform(np.array([[args.lower_mass]]))[0][0]
+    else:
+        max_mass = args.higher_mass
+        min_mass = args.lower_mass
+    
+    print('max_mass', max_mass)
+    print('min_mass', min_mass)
+
+    ensembled_samples = []
+    ensembled_mass = []
+
+    if not args.context_embedding:
+        interp_model = Conditional_ResNet_linear_interpolation(context_frequencies=args.context_frequencies,
+                                    time_frequencies=args.time_frequencies, 
+                                    context_features=1, 
+                                        input_dim=n_features, device=device,
+                                        hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
+                                        use_batch_norm=True, 
+                                        dropout_probability=0.2)
+    else:
+        interp_model = Discrete_Conditional_ResNet_linear_interpolation(frequencies=args.time_frequencies,
+                                 context_features=1, 
+                                 input_dim=n_features, device=device,
+                                 hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
+                                 use_batch_norm=True, 
+                                 dropout_probability=0.2,
+                                 context_embed=SinusoidalPosEmb(dim=args.context_frequencies,theta=100))
+   #scaled_mass = scaler.transform(mass.cpu().detach().numpy())
+    for i,file in enumerate(lowest_epochs):
+        print(file)
+        interp_model.load_state_dict(torch.load(f'{save_path}/model_epoch_{file}.pth'))
+        #model.load_state_dict(torch.load(f'{CR_path}model_epoch_{file}.pth'))
+        noise_batch = noise[i*mini_batch_length:(i+1)*mini_batch_length]
+        mass_batch = mass_samples_SR[i*mini_batch_length:(i+1)*mini_batch_length]
+        # scaled_batch = scaled_mass[i*mini_batch_length:(i+1)*mini_batch_length]
+        if args.context_embedding:
+            _samples = sample_model_interpolation_discrete(interp_model, noise_batch, 
+                                                           mass_batch, start=0.0, end=1.0, 
+                                                           context_bins=context_bins, 
+                                                           max_mass=max_mass, min_mass=min_mass)
+        else: 
+            _samples = sample_model_interpolation(interp_model, noise_batch, mass_batch, start=0.0, 
+                                                  end=1.0, max_mass=max_mass, min_mass=min_mass)
+        #samples = sample_interpolation_(model, noise_batch, mass_batch, start=0.0, end=1.0)
+        ensembled_samples.append(_samples)
+        ensembled_mass.append(mass_batch)
+
+    mass = torch.cat(ensembled_mass, dim=0)
+    _samples = torch.cat(ensembled_samples, dim=0)
+    _samples = torch.concat([mass, _samples], axis=1)
+    samples_interpolated = torch.concat([_samples, torch.ones(_samples.shape[0],1).to(device)], axis=1)
+    samples_inverse_interpolated = inverse_transform(samples_interpolated, pre_parameters).cpu().detach().numpy()
+    if args.scaled_mass:
+        samples_inverse_interpolated[:,0] = scaler.inverse_transform(samples_inverse_interpolated[:,0].reshape(-1,1)).reshape(-1)
+
+    end_time = time.time()
+    print('time to sample interpolated', end_time-start_time)
+    np.save(f'{save_path}samples_interpolated.npy', samples_inverse_interpolated)
+    np.save(f'{save_path}samples_interpolated_preprocessed.npy', samples_interpolated.cpu().detach().numpy())
+
+
+
+
 
 delete_paths = [f'{save_path}model_epoch_{epoch}.pth' for epoch in logprob_epoch if epoch not in lowest_epochs]
 
@@ -310,20 +402,12 @@ for path in delete_paths:
     os.remove(path)
 
 
-mass = torch.cat(ensembled_mass, dim=0)
-samples = torch.cat(ensembled_samples, dim=0)
-samples = torch.concat([mass, samples], axis=1)
-samples = torch.concat([samples, torch.ones(samples.shape[0],1).to(device)], axis=1)
-
-
-samples_inverse = inverse_transform(samples, pre_parameters).cpu().detach().numpy()
-samples_inverse[:,0] = scaler.inverse_transform(samples_inverse[:,0].reshape(-1,1)).reshape(-1)
-
 np.save(f'{save_path}samples.npy', samples_inverse)
 np.save(f'{save_path}samples_preprocessed.npy', samples.cpu().detach().numpy())
 
+###############################################################################
 ## %%
-for i in range(1,n_features+1,1):
+for i in range(0,n_features+1,1):
     figure = plt.figure()
     max_val = np.max(SR_data[:,i])
     min_val = np.min(SR_data[:,i])
@@ -332,6 +416,8 @@ for i in range(1,n_features+1,1):
     plt.hist(SR_data[:,i],bins=bins,density=True, histtype='stepfilled', label='data', color='gray', alpha=0.5)
     plt.hist(samples_inverse[:,i],bins=bins,density=True,
             histtype='step', label='samples')
+    plt.hist(samples_inverse_interpolated[:,i],bins=bins,density=True,
+             histtype='step', label='samples_interpolated')
     plt.hist(_x_test[:,i][_x_test[:,-1]==0], bins=bins, density=True, histtype='step', label='true background', color='black')
     plt.legend()
     plt.savefig(f'{save_path}feature_{i}.png')
@@ -347,18 +433,18 @@ if args.baseline:
     extrabkg = np.concatenate([extrabkg[:,:5], extrabkg[:,-1].reshape(-1,1)], axis=1)
 extra_bkg = preprocess_params_transform(extrabkg, pre_parameters_cpu)[:266666]
 
-sample_data = np.vstack((samples.detach().cpu().numpy(),x_test[x_test[:,-1]==0]))
-sample_data_train, sample_data_val = train_test_split(sample_data, test_size=0.5, random_state=args.seed)
+# sample_data = np.vstack((samples.detach().cpu().numpy(),x_test[x_test[:,-1]==0]))
+# sample_data_train, sample_data_val = train_test_split(sample_data, test_size=0.5, random_state=args.seed)
 
-clf = HistGradientBoostingClassifier(validation_fraction=0.5,max_iter=1000,verbose=0)
-clf.fit(sample_data[:,1:-1], sample_data[:,-1])
-predict = clf.predict_proba(sample_data_val[:,1:-1])[:,1]
+# clf = HistGradientBoostingClassifier(validation_fraction=0.5,max_iter=1000,verbose=0)
+# clf.fit(sample_data[:,1:-1], sample_data[:,-1])
+# predict = clf.predict_proba(sample_data_val[:,1:-1])[:,1]
 
-auc = roc_auc_score(sample_data_val[:,-1], predict)
-print('AUC_sample_quality: ', auc)
+# auc = roc_auc_score(sample_data_val[:,-1], predict)
+# print('AUC_sample_quality: ', auc)
 
-if args.wandb:
-    wandb.log({'AUC_sample_quality': auc})
+# if args.wandb:
+#     wandb.log({'AUC_sample_quality': auc})
 
 from sklearn.utils.class_weight import compute_sample_weight
 
@@ -366,6 +452,11 @@ iad_data = np.vstack((x_SR[:,1:-1], extra_bkg[:,1:-1]))
 iad_labels = np.concatenate([np.ones(x_SR.shape[0]), np.zeros(extra_bkg.shape[0])])
 cathode_data = np.vstack((x_SR[:,1:-1], samples.detach().cpu().numpy()[:,1:-1]))
 cathode_labels = np.concatenate([np.ones(x_SR.shape[0]), np.zeros(samples.shape[0])])
+if args.sample_interpolated:
+    cathode_interpolated_data = np.vstack((x_SR[:,1:-1], samples_interpolated.detach().cpu().numpy()[:,1:-1]))
+    cathode_interpolated_labels = np.concatenate([np.ones(x_SR.shape[0]), np.zeros(samples_interpolated.shape[0])])
+    sample_weights_cathode_interpolated = compute_sample_weight(class_weight='balanced', y=cathode_interpolated_labels)
+
 sample_weights_cathode = compute_sample_weight(class_weight='balanced', y=cathode_labels)
 sample_weights_iad = compute_sample_weight(class_weight='balanced', y=iad_labels)
 
@@ -391,9 +482,32 @@ for seed in range(args.ensemble_size):
 predict_cathode = np.mean(predict_cathode, axis=0)
 sic_score_cathode , tpr_score_cathode , fpr_score_cathode = SIC_cut(x_test[:,-1], predict_cathode)
 
+if args.sample_interpolated:
+    predict_cathode_interpolated = []
+
+    for seed in range(args.ensemble_size):
+        clf = HistGradientBoostingClassifier(validation_fraction=0.5,max_iter=1000,verbose=0, random_state=seed)
+        clf.fit(cathode_interpolated_data, cathode_interpolated_labels.reshape(-1,1), sample_weight=sample_weights_cathode_interpolated)
+        predict_cathode_interpolated.append(clf.predict_proba(x_test[:,1:-1])[:,1])
+
+    predict_cathode_interpolated = np.mean(predict_cathode_interpolated, axis=0)
+    sic_score_cathode_interpolated , tpr_score_cathode_interpolated , fpr_score_cathode_interpolated = SIC_cut(x_test[:,-1], predict_cathode_interpolated)
+
+    np.save(f'{save_path}sic_cathode_interpolated.npy', sic_score_cathode_interpolated)
+    np.save(f'{save_path}tpr_cathode_interpolated.npy', tpr_score_cathode_interpolated)
+    np.save(f'{save_path}fpr_cathode_interpolated.npy', fpr_score_cathode_interpolated)
+
+    np.save(f'{save_path}predict_cathode_interpolated.npy', predict_cathode_interpolated)
+
+
+
+
+
 figure = plt.figure()
 plt.plot(tpr_score_iad, sic_score_iad, label='IAD')
-plt.plot(tpr_score_cathode, sic_score_cathode, label=f'Cathode {args.x_train}')
+plt.plot(tpr_score_cathode, sic_score_cathode, label=f'{args.x_train} samples')
+if args.sample_interpolated:
+    plt.plot(tpr_score_cathode_interpolated, sic_score_cathode_interpolated, label=f'{args.x_train} samples interpolated')
 plt.legend()
 if args.wandb:
     wandb.log({'sic_curve': wandb.Image(figure)})
@@ -403,7 +517,9 @@ plt.close()
 
 figure = plt.figure()
 plt.plot(1/fpr_score_iad, sic_score_iad, label='IAD')
-plt.plot(1/fpr_score_cathode, sic_score_cathode, label=f'Cathode {args.x_train}')
+plt.plot(1/fpr_score_cathode, sic_score_cathode, label=f'{args.x_train} samples')
+if args.sample_interpolated:
+    plt.plot(1/fpr_score_cathode_interpolated, sic_score_cathode_interpolated, label=f'{args.x_train} samples interpolated')
 plt.xscale('log')
 plt.legend()
 if args.wandb:
@@ -425,6 +541,9 @@ np.save(f'{save_path}fpr_cathode.npy', fpr_score_cathode)
 np.save(f'{save_path}sic_iad.npy', sic_score_iad)
 np.save(f'{save_path}tpr_iad.npy', tpr_score_iad)
 np.save(f'{save_path}fpr_iad.npy', fpr_score_iad)
+
+np.save(f'{save_path}predict_iad.npy', predict_iad)
+np.save(f'{save_path}predict_cathode.npy', predict_cathode)
 
 # if args.wandb:
 #     tprs = np.linspace(0,1,100)
