@@ -554,15 +554,9 @@ class Conditional_ResNet_time_embed(nn.Module):
  
         if time_embed is None:
             freq_dim = frequencies
-            #freq_dim = hidden_dim//2
-           # self.frequencies = 2**(2*torch.arange(freq_dim).float()/(freq_dim/2))*torch.pi
-           # self.frequencies = (2**torch.arange(0,frequencies,1).float())*torch.pi
-            #self.frequencies = 2**(2*torch.arange(frequencies).float()/frequencies)*torch.pi
             self.frequencies = torch.arange(1,frequencies+1,1).float()*torch.pi
             self.frequencies = self.frequencies.to(device)
             self.context_dim = 2*freq_dim + context_features
-            #self.context_dim = 4*len(self.frequencies)
-            #self.context_dim = 2*frequencies + context_features
         else:
             self.context_dim = time_embed.dim + context_features
         

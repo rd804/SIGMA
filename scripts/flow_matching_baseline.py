@@ -72,6 +72,10 @@ args = parser.parse_args()
 save_path = 'results/'+args.wandb_group+'/'\
             +args.wandb_job_type+'/'+args.wandb_run_name+'/'
 
+if os.path.exists(f'{save_path}predict_cathode.npy'):
+    print(f'already done {args.wandb_run_name}')
+    sys.exit()
+
 #save_path = f'{save_path}_'
 
 # if os.path.exists(f'{save_path}best_val_loss_scores.npy'):
@@ -232,15 +236,29 @@ for i in range(1):
                             non_linear_context=args.non_linear_context)
        # print(model)
     else:
-        print('no context embedding')
-        model = Conditional_ResNet(context_frequencies=args.context_frequencies,
-                                   time_frequencies=args.time_frequencies, 
-                                   context_features=1, 
-                                    input_dim=n_features, device=device,
-                                    hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
-                                    use_batch_norm=True, 
-                                    dropout_probability=0.2,
-                                    non_linear_context=args.non_linear_context)
+        if not args.x_train == 'CR':
+            # print('no context embedding')
+            print('Model with continuous mass embedding')
+            model = Conditional_ResNet(context_frequencies=args.context_frequencies,
+                                    time_frequencies=args.time_frequencies, 
+                                    context_features=1, 
+                                        input_dim=n_features, device=device,
+                                        hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
+                                        use_batch_norm=True, 
+                                        dropout_probability=0.2,
+                                        non_linear_context=args.non_linear_context)
+            
+        elif args.x_train == 'CR':
+            print('Since we are training CR, model without continuous mass embedding is used')
+            model = Conditional_ResNet_time_embed(frequencies=args.time_frequencies, 
+                                context_features=1, 
+                                input_dim=n_features, device=device,
+                                hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
+                                use_batch_norm=True, 
+                                dropout_probability=0.2,
+                                non_linear_context=args.non_linear_context)
+
+
 
                             
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
@@ -416,7 +434,8 @@ for i in range(0,n_features+1,1):
     plt.hist(SR_data[:,i],bins=bins,density=True, histtype='stepfilled', label='data', color='gray', alpha=0.5)
     plt.hist(samples_inverse[:,i],bins=bins,density=True,
             histtype='step', label='samples')
-    plt.hist(samples_inverse_interpolated[:,i],bins=bins,density=True,
+    if args.sample_interpolated:
+        plt.hist(samples_inverse_interpolated[:,i],bins=bins,density=True,
              histtype='step', label='samples_interpolated')
     plt.hist(_x_test[:,i][_x_test[:,-1]==0], bins=bins, density=True, histtype='step', label='true background', color='black')
     plt.legend()
@@ -498,9 +517,6 @@ if args.sample_interpolated:
     np.save(f'{save_path}fpr_cathode_interpolated.npy', fpr_score_cathode_interpolated)
 
     np.save(f'{save_path}predict_cathode_interpolated.npy', predict_cathode_interpolated)
-
-
-
 
 
 figure = plt.figure()
