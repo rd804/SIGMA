@@ -489,6 +489,195 @@ class ResidualNet_linear_interpolation(nn.Module):
         outputs = self.final_layer(temps)
         return outputs
 
+class ResidualNet_linear_interpolation_block(nn.Module):
+    """A general-purpose residual network. Works only with 1-dim inputs."""
+
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        hidden_features,
+        context_features=None,
+        num_blocks=2,
+        activation=F.relu,
+        dropout_probability=0.0,
+        use_batch_norm=False,
+        non_linear_context=False
+    ):
+        super().__init__()
+        self.hidden_features = hidden_features
+        self.context_features = context_features
+        if context_features is not None:
+            self.initial_layer = nn.Linear(
+                in_features + context_features, hidden_features
+            )
+        else:
+            self.initial_layer = nn.Linear(in_features, hidden_features)
+        self.blocks = nn.ModuleList(
+            [
+                ResidualBlock(
+                    features=hidden_features,
+                    context_features=context_features,
+                    activation=activation,
+                    dropout_probability=dropout_probability,
+                    use_batch_norm=use_batch_norm,
+                    non_linear_context=non_linear_context
+                )
+                for _ in range(num_blocks)
+            ]
+        )
+        self.final_layer = nn.Linear(hidden_features, out_features)
+        self.activation = activation
+
+    def forward(self, inputs, context1=None, context2=None, weight=None):
+        if context1 is None:
+            temps = self.initial_layer(inputs)
+        else:
+            temps1 = self.initial_layer(torch.cat((inputs, context1), dim=1))
+            temps2 = self.initial_layer(torch.cat((inputs, context2), dim=1))
+            temps1 = self.activation(temps1)
+            temps2 = self.activation(temps2)
+            temps = weight * temps1 + (1 - weight) * temps2
+        for k, block in enumerate(self.blocks):
+            temps1 = block(temps, context=context1)
+            temps2 = block(temps, context=context2)
+            temps = weight * temps1 + (1 - weight) * temps2
+            #temps = block(temps, context1=context1, context2=context2, weight=weight)
+        outputs = self.final_layer(temps)
+        return outputs
+
+
+class ResidualNet_linear_interpolation_indiv_block(nn.Module):
+    """A general-purpose residual network. Works only with 1-dim inputs."""
+
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        hidden_features,
+        context_features=None,
+        num_blocks=2,
+        activation=F.relu,
+        dropout_probability=0.0,
+        use_batch_norm=False,
+        non_linear_context=False,
+        interp_block=2
+    ):
+        super().__init__()
+        self.hidden_features = hidden_features
+        self.context_features = context_features
+        if context_features is not None:
+            self.initial_layer = nn.Linear(
+                in_features + context_features, hidden_features
+            )
+        else:
+            self.initial_layer = nn.Linear(in_features, hidden_features)
+        self.blocks = nn.ModuleList(
+            [
+                ResidualBlock(
+                    features=hidden_features,
+                    context_features=context_features,
+                    activation=activation,
+                    dropout_probability=dropout_probability,
+                    use_batch_norm=use_batch_norm,
+                    non_linear_context=non_linear_context
+                )
+                for _ in range(num_blocks)
+            ]
+        )
+        self.final_layer = nn.Linear(hidden_features, out_features)
+        self.activation = activation
+        self.interp_block = interp_block
+        self.non_linear_context = non_linear_context
+
+    def forward(self, inputs, context1=None, context2=None, weight=None, context=None):
+        if context1 is None:
+            temps = self.initial_layer(inputs)
+        else:
+            if 0 == self.interp_block:
+                temps1 = self.initial_layer(torch.cat((inputs, context1), dim=1))
+                temps2 = self.initial_layer(torch.cat((inputs, context2), dim=1))
+                temps1 = self.activation(temps1)
+                temps2 = self.activation(temps2)
+                temps = weight * temps1 + (1 - weight) * temps2
+            else:
+                temps = self.initial_layer(torch.cat((inputs, context), dim=1))
+                if self.non_linear_context:
+                    temps = self.activation(temps)
+
+        for k, block in enumerate(self.blocks):
+            block_index = k+1
+            if block_index == self.interp_block:
+                temps1 = block(temps, context=context1)
+                temps2 = block(temps, context=context2)
+                temps = weight * temps1 + (1 - weight) * temps2
+            else:
+                temps = block(temps, context=context)
+
+            # temps = block(temps, context1=context1, context2=context2, weight=weight)
+        outputs = self.final_layer(temps)
+        return outputs
+
+
+
+
+class Conditional_ResNet_low_freq(nn.Module):
+    def __init__(self, context_frequencies: int=3, time_frequencies=3,context_features: int=1,
+                 input_dim: int=2, device: torch.device=torch.device('cpu'),
+                 hidden_dim: int=256, num_blocks: int=2,
+                 use_batch_norm: bool=True, dropout_probability: float=0.2, time_embed=None,
+                 non_linear_context=False):
+        super().__init__()
+
+ 
+        if time_embed is None:
+            self.time_frequencies = torch.arange(1,time_frequencies+1,1).float()*torch.pi
+            self.time_frequencies = self.time_frequencies.to(device)
+            self.context_frequencies = (2**torch.arange(0,context_frequencies,1).float())*torch.pi
+            self.context_frequencies = self.context_frequencies.to(device)
+            #self.time_frequencies = (2**torch.arange(0,time_frequencies,1).float())*torch.pi
+            #self.time_frequencies = self.time_frequencies.to(device)
+            self.context_dim = 2*context_frequencies + 2*time_frequencies
+            #self.context_dim = 2*frequencies + context_features
+        else:
+            self.context_dim = time_embed.dim + context_features
+        
+        self.time_embed = time_embed
+        self.hidden_dim = hidden_dim
+        self.num_blocks = num_blocks
+
+        self.model = ResidualNet(in_features=input_dim, out_features=input_dim, 
+                    context_features=self.context_dim, hidden_features=hidden_dim, 
+                    num_blocks=num_blocks,dropout_probability=dropout_probability,
+                     use_batch_norm=use_batch_norm,
+                     non_linear_context=non_linear_context).to(device)
+
+
+    def forward(self, x, context=None):
+        _t = x[:,-1]
+        _x = x[:,:-1]
+
+        context = context.flatten()
+
+        if self.time_embed is not None:
+            t = self.time_embed(_t)
+        else:
+            t = self.time_frequencies * _t[...,None]
+            t = torch.cat((t.cos(), t.sin()), dim=-1).to(x.device)
+            context = self.context_frequencies * context[...,None]
+            context = torch.cat((context.cos(), context.sin()), dim=-1).to(x.device)
+
+            # set frequencies higher than 2 to zero
+            context[:,3:len(self.context_frequencies)] = 0.0
+            context[:,3+len(self.context_frequencies):] = 0.0
+
+        if context is not None:
+            context = torch.cat((t, context), dim=-1)
+        else:
+            context = t
+
+        return self.model(_x, context=context)
+
 
 class Conditional_ResNet(nn.Module):
     def __init__(self, context_frequencies: int=3, time_frequencies=3,context_features: int=1,
@@ -543,6 +732,149 @@ class Conditional_ResNet(nn.Module):
 
         return self.model(_x, context=context)
 
+
+class Conditional_MLP(nn.Module):
+    def __init__(self, context_frequencies: int=3, time_frequencies=3,context_features: int=1,
+                 input_dim: int=2, device: torch.device=torch.device('cpu'),
+                 hidden_dim: int=256):
+        super().__init__()
+
+
+        self.time_frequencies = torch.arange(1,time_frequencies+1,1).float()*torch.pi
+        self.time_frequencies = self.time_frequencies.to(device)
+        self.context_frequencies = (2**torch.arange(0,context_frequencies,1).float())*torch.pi
+        self.context_frequencies = self.context_frequencies.to(device)
+        #self.time_frequencies = (2**torch.arange(0,time_frequencies,1).float())*torch.pi
+        #self.time_frequencies = self.time_frequencies.to(device)
+        self.context_dim = 2*context_frequencies + 2*time_frequencies
+            #self.context_dim = 2*frequencies + context_features
+
+        self.hidden_dim = hidden_dim
+
+        mlp_input_dim = input_dim + self.context_dim
+
+        self.model = nn.Sequential(nn.Linear(mlp_input_dim, hidden_dim),
+                    nn.BatchNorm1d(hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(hidden_dim, hidden_dim),
+                    nn.BatchNorm1d(hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(hidden_dim, hidden_dim),
+                    nn.BatchNorm1d(hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(0.2),
+                    nn.Linear(hidden_dim, input_dim)).to(device)
+
+    def forward(self, x, context=None):
+        _t = x[:,-1]
+        _x = x[:,:-1]
+
+        context = context.flatten()
+
+       # if self.time_embed is not None:
+        #    t = self.time_embed(_t)
+        #else:
+        t = self.time_frequencies * _t[...,None]
+        t = torch.cat((t.cos(), t.sin()), dim=-1).to(x.device)
+        context = self.context_frequencies * context[...,None]
+        context = torch.cat((context.cos(), context.sin()), dim=-1).to(x.device)
+
+        if context is not None:
+            context = torch.cat((t, context), dim=-1)
+        else:
+            context = t
+        
+        # concatenate _x and context
+        x = torch.cat((_x, context), dim=-1)
+
+        return self.model(x)
+
+
+class Conditional_MLP_linear_interpolation(nn.Module):
+    def __init__(self, context_frequencies: int=3, time_frequencies=3,context_features: int=1,
+                 input_dim: int=2, device: torch.device=torch.device('cpu'),
+                 hidden_dim: int=256):
+        super().__init__()
+
+        self.time_frequencies = torch.arange(1,time_frequencies+1,1).float()*torch.pi
+        self.time_frequencies = self.time_frequencies.to(device)
+        self.context_frequencies = (2**torch.arange(0,context_frequencies,1).float())*torch.pi
+        self.context_frequencies = self.context_frequencies.to(device)
+        #self.time_frequencies = (2**torch.arange(0,time_frequencies,1).float())*torch.pi
+        #self.time_frequencies = self.time_frequencies.to(device)
+        self.context_dim = 2*context_frequencies + 2*time_frequencies
+            #self.context_dim = 2*frequencies + context_features
+
+        self.hidden_dim = hidden_dim
+
+        mlp_input_dim = input_dim + self.context_dim
+
+        self.model = nn.ModuleList([nn.Linear(mlp_input_dim, hidden_dim),
+                                                  nn.BatchNorm1d(hidden_dim),
+                                                    nn.ReLU(),
+                                                    nn.Dropout(0.2),
+                                                    nn.Linear(hidden_dim, hidden_dim),
+                                                    nn.BatchNorm1d(hidden_dim),
+                                                    nn.ReLU(),
+                                                    nn.Dropout(0.2),
+                                                    nn.Linear(hidden_dim, hidden_dim),
+                                                    nn.BatchNorm1d(hidden_dim),
+                                                    nn.ReLU(),
+                                                    nn.Dropout(0.2),
+                                                    nn.Linear(hidden_dim, input_dim)])
+        # send modules to device
+        self.model = self.model.to(device)
+
+
+    def forward(self, x, context1=None, context2=None, weight=None):
+        _t = x[:,-1]
+        _x = x[:,:-1]
+
+        context1 = context1.flatten()
+        context2 = context2.flatten()
+
+        # if self.time_embed is not None:
+        #     t = self.time_embed(_t)
+        # else:
+        t = self.time_frequencies * _t[...,None]
+        t = torch.cat((t.cos(), t.sin()), dim=-1).to(x.device)
+        context1 = self.context_frequencies * context1[...,None]
+        context1 = torch.cat((context1.cos(), context1.sin()), dim=-1).to(x.device)
+        context2 = self.context_frequencies * context2[...,None]
+        context2 = torch.cat((context2.cos(), context2.sin()), dim=-1).to(x.device)
+
+        if context1 is not None:
+            context1 = torch.cat((t, context1), dim=-1)
+            context2 = torch.cat((t, context2), dim=-1)
+           # context = torch.cat((t, context), dim=-1)
+        else:
+            context = t
+
+        x1 = torch.cat((_x, context1), dim=-1)
+        x2 = torch.cat((_x, context2), dim=-1)
+
+        for layer_index, layer in enumerate(self.model):
+            if layer_index <= 4:
+                x1 = layer(x1)
+                x2 = layer(x2)
+                x = weight * x1 + (1 - weight) * x2
+            else:
+                x = layer(x)
+        
+        return x
+
+       # x = weight * x1 + (1 - weight) * x2
+
+        #return self.model(x)
+
+        #return self.model(_x, context1=context1, context2=context2, weight=weight)
+
+
+
+
+
 class Conditional_ResNet_time_embed(nn.Module):
     def __init__(self, frequencies: int=3, context_features: int=1,
                  input_dim: int=2, device: torch.device=torch.device('cpu'),
@@ -591,6 +923,112 @@ class Conditional_ResNet_time_embed(nn.Module):
             context = t
 
         return self.model(_x, context=context)
+
+class Conditional_ResNet_time_embed_linear_interpolation(nn.Module):
+    def __init__(self, frequencies: int=3, context_features: int=1,
+                 input_dim: int=2, device: torch.device=torch.device('cpu'),
+                 hidden_dim: int=256, num_blocks: int=2,
+                 use_batch_norm: bool=True, dropout_probability: float=0.2, time_embed=None,
+                 non_linear_context=False):
+        super().__init__()
+
+ 
+        if time_embed is None:
+            freq_dim = frequencies
+            self.frequencies = torch.arange(1,frequencies+1,1).float()*torch.pi
+            self.frequencies = self.frequencies.to(device)
+            self.context_dim = 2*freq_dim + context_features
+        else:
+            self.context_dim = time_embed.dim + context_features
+        
+        self.time_embed = time_embed
+        self.hidden_dim = hidden_dim
+        self.num_blocks = num_blocks
+
+        self.model = ResidualNet_linear_interpolation(in_features=input_dim, out_features=input_dim, 
+                    context_features=self.context_dim, hidden_features=hidden_dim, 
+                    num_blocks=num_blocks,dropout_probability=dropout_probability,
+                     use_batch_norm=use_batch_norm).to(device)
+
+
+    def forward(self, x, context1=None, context2=None, weight=None):
+        _t = x[:,-1]
+        _x = x[:,:-1]
+
+        #context = context.flatten()
+
+        if self.time_embed is not None:
+            t = self.time_embed(_t)
+        else:
+            t = self.frequencies * _t[...,None]
+            t = torch.cat((t.cos(), t.sin()), dim=-1).to(x.device)
+           # context = self.frequencies * context[...,None]
+           # context = torch.cat((context.cos(), context.sin()), dim=-1).to(x.device)
+
+        if context1 is not None:
+            context1 = torch.cat((t, context1), dim=-1)
+            context2 = torch.cat((t, context2), dim=-1)
+            #context = 
+        else:
+            context = t
+
+        return self.model(_x, context1=context1, context2=context2, weight=weight)
+
+class Conditional_ResNet_time_embed_vector_interpolation(nn.Module):
+    def __init__(self, frequencies: int=3, context_features: int=1,
+                 input_dim: int=2, device: torch.device=torch.device('cpu'),
+                 hidden_dim: int=256, num_blocks: int=2,
+                 use_batch_norm: bool=True, dropout_probability: float=0.2, time_embed=None,
+                 non_linear_context=False):
+        super().__init__()
+
+ 
+        if time_embed is None:
+            freq_dim = frequencies
+            self.frequencies = torch.arange(1,frequencies+1,1).float()*torch.pi
+            self.frequencies = self.frequencies.to(device)
+            self.context_dim = 2*freq_dim + context_features
+        else:
+            self.context_dim = time_embed.dim + context_features
+        
+        self.time_embed = time_embed
+        self.hidden_dim = hidden_dim
+        self.num_blocks = num_blocks
+
+        self.model = ResidualNet(in_features=input_dim, out_features=input_dim, 
+                    context_features=self.context_dim, hidden_features=hidden_dim, 
+                    num_blocks=num_blocks,dropout_probability=dropout_probability,
+                     use_batch_norm=use_batch_norm,
+                     non_linear_context=non_linear_context).to(device)
+
+
+    def forward(self, x, context1=None, context2=None, weight=None):
+        _t = x[:,-1]
+        _x = x[:,:-1]
+
+        #context = context.flatten()
+
+        if self.time_embed is not None:
+            t = self.time_embed(_t)
+        else:
+            t = self.frequencies * _t[...,None]
+            t = torch.cat((t.cos(), t.sin()), dim=-1).to(x.device)
+           # context = self.frequencies * context[...,None]
+           # context = torch.cat((context.cos(), context.sin()), dim=-1).to(x.device)
+
+        if context1 is not None:
+            context1 = torch.cat((t, context1), dim=-1)
+            context2 = torch.cat((t, context2), dim=-1)
+            #context = 
+        else:
+            context = t
+        
+        return weight * self.model(_x, context=context1) + (1 - weight) * self.model(_x, context=context2)
+
+        #return self.model(_x, context1=context1, context2=context2, weight=weight)
+
+
+
 
 class Discrete_Conditional_ResNet(nn.Module):
     def __init__(self, frequencies: int=3, context_features: int=1,
@@ -737,6 +1175,252 @@ class Conditional_ResNet_linear_interpolation(nn.Module):
             context = t
 
         return self.model(_x, context1=context1, context2=context2, weight=weight)
+
+
+class Conditional_ResNet_linear_interpolation_block(nn.Module):
+    def __init__(self, time_frequencies: int=3, context_frequencies: int=3, context_features: int=1,
+                 input_dim: int=2, device: torch.device=torch.device('cpu'),
+                 hidden_dim: int=256, num_blocks: int=2,
+                 use_batch_norm: bool=True, dropout_probability: float=0.2, time_embed=None,
+                 non_linear_context=False):
+        super().__init__()
+
+ 
+        if time_embed is None:
+            self.time_frequencies = torch.arange(1,time_frequencies+1,1).float()*torch.pi
+            self.time_frequencies = self.time_frequencies.to(device)
+            self.context_frequencies = (2**torch.arange(0,context_frequencies,1).float())*torch.pi
+            self.context_frequencies = self.context_frequencies.to(device)
+            #self.time_frequencies = (2**torch.arange(0,time_frequencies,1).float())*torch.pi
+            #self.time_frequencies = self.time_frequencies.to(device)
+            self.context_dim = 2*context_frequencies + 2*time_frequencies
+        else:
+            self.context_dim = time_embed.dim + context_features
+
+        self.time_embed = time_embed
+        self.hidden_dim = hidden_dim
+        self.num_blocks = num_blocks
+
+        self.model = ResidualNet_linear_interpolation_block(in_features=input_dim, out_features=input_dim, 
+                    context_features=self.context_dim, hidden_features=hidden_dim, 
+                    num_blocks=num_blocks,dropout_probability=dropout_probability,
+                     use_batch_norm=use_batch_norm,
+                     non_linear_context=non_linear_context).to(device)
+
+
+    def forward(self, x, context1=None, context2=None, weight=None):
+        _t = x[:,-1]
+        _x = x[:,:-1]
+
+        context1 = context1.flatten()
+        context2 = context2.flatten()
+
+        if self.time_embed is not None:
+            t = self.time_embed(_t)
+        else:
+            t = self.time_frequencies * _t[...,None]
+            t = torch.cat((t.cos(), t.sin()), dim=-1).to(x.device)
+            context1 = self.context_frequencies * context1[...,None]
+            context1 = torch.cat((context1.cos(), context1.sin()), dim=-1).to(x.device)
+            context2 = self.context_frequencies * context2[...,None]
+            context2 = torch.cat((context2.cos(), context2.sin()), dim=-1).to(x.device)
+
+        if context1 is not None:
+            context1 = torch.cat((t, context1), dim=-1)
+            context2 = torch.cat((t, context2), dim=-1)
+           # context = torch.cat((t, context), dim=-1)
+        else:
+            context = t
+
+        return self.model(_x, context1=context1, context2=context2, weight=weight)
+
+
+
+class Conditional_ResNet_linear_interpolation_indiv_block(nn.Module):
+    def __init__(self, time_frequencies: int=3, context_frequencies: int=3, context_features: int=1,
+                 input_dim: int=2, device: torch.device=torch.device('cpu'),
+                 hidden_dim: int=256, num_blocks: int=2,
+                 use_batch_norm: bool=True, dropout_probability: float=0.2, time_embed=None,
+                 non_linear_context=False,
+                 interp_block=2):
+        super().__init__()
+
+ 
+        if time_embed is None:
+            self.time_frequencies = torch.arange(1,time_frequencies+1,1).float()*torch.pi
+            self.time_frequencies = self.time_frequencies.to(device)
+            self.context_frequencies = (2**torch.arange(0,context_frequencies,1).float())*torch.pi
+            self.context_frequencies = self.context_frequencies.to(device)
+            #self.time_frequencies = (2**torch.arange(0,time_frequencies,1).float())*torch.pi
+            #self.time_frequencies = self.time_frequencies.to(device)
+            self.context_dim = 2*context_frequencies + 2*time_frequencies
+        else:
+            self.context_dim = time_embed.dim + context_features
+
+        self.time_embed = time_embed
+        self.hidden_dim = hidden_dim
+        self.num_blocks = num_blocks
+
+        self.model = ResidualNet_linear_interpolation_indiv_block(in_features=input_dim, out_features=input_dim, 
+                    context_features=self.context_dim, hidden_features=hidden_dim, 
+                    num_blocks=num_blocks,dropout_probability=dropout_probability,
+                     use_batch_norm=use_batch_norm,
+                     non_linear_context=non_linear_context,
+                     interp_block=interp_block).to(device)
+
+
+    def forward(self, x, context1=None, context2=None, weight=None, context=None):
+        _t = x[:,-1]
+        _x = x[:,:-1]
+
+        context1 = context1.flatten()
+        context2 = context2.flatten()
+        context = context.flatten()
+
+        if self.time_embed is not None:
+            t = self.time_embed(_t)
+        else:
+            t = self.time_frequencies * _t[...,None]
+            t = torch.cat((t.cos(), t.sin()), dim=-1).to(x.device)
+            context1 = self.context_frequencies * context1[...,None]
+            context1 = torch.cat((context1.cos(), context1.sin()), dim=-1).to(x.device)
+            context2 = self.context_frequencies * context2[...,None]
+            context2 = torch.cat((context2.cos(), context2.sin()), dim=-1).to(x.device)
+
+            context = self.context_frequencies * context[...,None]
+            context = torch.cat((context.cos(), context.sin()), dim=-1).to(x.device)
+
+        if context1 is not None:
+            context1 = torch.cat((t, context1), dim=-1)
+            context2 = torch.cat((t, context2), dim=-1)
+
+            context = torch.cat((t, context), dim=-1)
+        else:
+            context = t
+
+        return self.model(_x, context1=context1, context2=context2, weight=weight, context=context)
+
+
+
+class Conditional_ResNet_linear_interpolation_vector(nn.Module):
+    def __init__(self, time_frequencies: int=3, context_frequencies: int=3, context_features: int=1,
+                 input_dim: int=2, device: torch.device=torch.device('cpu'),
+                 hidden_dim: int=256, num_blocks: int=2,
+                 use_batch_norm: bool=True, dropout_probability: float=0.2, time_embed=None,
+                 non_linear_context=False):
+        super().__init__()
+
+ 
+        if time_embed is None:
+            self.time_frequencies = torch.arange(1,time_frequencies+1,1).float()*torch.pi
+            self.time_frequencies = self.time_frequencies.to(device)
+            self.context_frequencies = (2**torch.arange(0,context_frequencies,1).float())*torch.pi
+            self.context_frequencies = self.context_frequencies.to(device)
+            #self.time_frequencies = (2**torch.arange(0,time_frequencies,1).float())*torch.pi
+            #self.time_frequencies = self.time_frequencies.to(device)
+            self.context_dim = 2*context_frequencies + 2*time_frequencies
+        else:
+            self.context_dim = time_embed.dim + context_features
+
+        self.time_embed = time_embed
+        self.hidden_dim = hidden_dim
+        self.num_blocks = num_blocks
+
+        self.model = ResidualNet(in_features=input_dim, out_features=input_dim, 
+                    context_features=self.context_dim, hidden_features=hidden_dim, 
+                    num_blocks=num_blocks,dropout_probability=dropout_probability,
+                     use_batch_norm=use_batch_norm,
+                     non_linear_context=non_linear_context).to(device)
+
+
+    def forward(self, x, context1=None, context2=None, weight=None):
+        _t = x[:,-1]
+        _x = x[:,:-1]
+
+        context1 = context1.flatten()
+        context2 = context2.flatten()
+
+        if self.time_embed is not None:
+            t = self.time_embed(_t)
+        else:
+            t = self.time_frequencies * _t[...,None]
+            t = torch.cat((t.cos(), t.sin()), dim=-1).to(x.device)
+            context1 = self.context_frequencies * context1[...,None]
+            context1 = torch.cat((context1.cos(), context1.sin()), dim=-1).to(x.device)
+            context2 = self.context_frequencies * context2[...,None]
+            context2 = torch.cat((context2.cos(), context2.sin()), dim=-1).to(x.device)
+
+        if context1 is not None:
+            context1 = torch.cat((t, context1), dim=-1)
+            context2 = torch.cat((t, context2), dim=-1)
+           # context = torch.cat((t, context), dim=-1)
+        else:
+            context = t
+
+
+        return weight * self.model(_x, context=context1) + (1-weight) * self.model(_x, context=context2)
+
+class Conditional_ResNet_linear_interpolation_embedding(nn.Module):
+    def __init__(self, time_frequencies: int=3, context_frequencies: int=3, context_features: int=1,
+                 input_dim: int=2, device: torch.device=torch.device('cpu'),
+                 hidden_dim: int=256, num_blocks: int=2,
+                 use_batch_norm: bool=True, dropout_probability: float=0.2, time_embed=None,
+                 non_linear_context=False):
+        super().__init__()
+
+ 
+        if time_embed is None:
+            self.time_frequencies = torch.arange(1,time_frequencies+1,1).float()*torch.pi
+            self.time_frequencies = self.time_frequencies.to(device)
+            self.context_frequencies = (2**torch.arange(0,context_frequencies,1).float())*torch.pi
+            self.context_frequencies = self.context_frequencies.to(device)
+            #self.time_frequencies = (2**torch.arange(0,time_frequencies,1).float())*torch.pi
+            #self.time_frequencies = self.time_frequencies.to(device)
+            self.context_dim = 2*context_frequencies + 2*time_frequencies
+        else:
+            self.context_dim = time_embed.dim + context_features
+
+        self.time_embed = time_embed
+        self.hidden_dim = hidden_dim
+        self.num_blocks = num_blocks
+
+        self.model = ResidualNet(in_features=input_dim, out_features=input_dim, 
+                    context_features=self.context_dim, hidden_features=hidden_dim, 
+                    num_blocks=num_blocks,dropout_probability=dropout_probability,
+                     use_batch_norm=use_batch_norm,
+                     non_linear_context=non_linear_context).to(device)
+
+
+    def forward(self, x, context1=None, context2=None, weight=None):
+        _t = x[:,-1]
+        _x = x[:,:-1]
+
+        context1 = context1.flatten()
+        context2 = context2.flatten()
+
+        if self.time_embed is not None:
+            t = self.time_embed(_t)
+        else:
+            t = self.time_frequencies * _t[...,None]
+            t = torch.cat((t.cos(), t.sin()), dim=-1).to(x.device)
+            context1 = self.context_frequencies * context1[...,None]
+            context1 = torch.cat((context1.cos(), context1.sin()), dim=-1).to(x.device)
+            context2 = self.context_frequencies * context2[...,None]
+            context2 = torch.cat((context2.cos(), context2.sin()), dim=-1).to(x.device)
+
+            avg_context = weight * context1 + (1-weight) * context2
+
+        if context1 is not None:
+            context = torch.cat((t, avg_context), dim=-1)
+            #context1 = torch.cat((t, context1), dim=-1)
+            #context2 = torch.cat((t, context2), dim=-1)
+           # context = torch.cat((t, context), dim=-1)
+        else:
+            context = t
+
+        return self.model(_x, context=context)
+        #return weight * self.model(_x, context=context1) + (1-weight) * self.model(_x, context=context2)
+
 
 
 
@@ -987,4 +1671,36 @@ def sample_model_interpolation(model: torch.nn.Module , x: Tensor, context: Tens
 
         return z
 
+
+def sample_model_interpolation_block(model: torch.nn.Module , x: Tensor, context: Tensor, 
+            start:float=0.0, end:int=1.0, max_mass=3.8, min_mass=3.2) -> Tensor:
+        
+        constant = (context - max_mass)/(-(max_mass-min_mass))
+        context_less = torch.ones_like(context)*min_mass
+        contex_high = torch.ones_like(context)*max_mass
+
+        #context_less_numpy = context_less.cpu().detach().numpy()
+        #contex_high_numpy = contex_high.cpu().detach().numpy()
+        #context_less_digitized = torch.tensor(np.digitize(context_less_numpy, context_bins)).to(context.device)
+        #contex_high_digitized = torch.tensor(np.digitize(contex_high_numpy, context_bins)).to(context.device)
+
+       # context_less_digitized = torch.digitize(context_less, context_bins)
+
+        def augmented(t: Tensor, x: Tensor) -> Tensor:
+            model.eval()
+            with torch.no_grad():
+                t_array = torch.ones(x.shape[0], 1).to(x.device) * t
+                input_to_model = torch.cat([x,t_array], dim=-1)
+                vt = model(input_to_model, 
+                           context1=context_less, 
+                           context2=contex_high, 
+                           weight=constant,
+                           context=context)
+
+
+            return vt   
+
+        z = odeint(augmented, x, start, end, phi=model.parameters())
+
+        return z
 from src.generate_data_lhc import *

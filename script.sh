@@ -17,10 +17,10 @@ epochs=2000
 hidden_dim=256
 batch_size=4096
 num_blocks=4
-wandb_group=signal_scan
+wandb_group=no_signal_no_embed
 frequencies=9
 data_dir=data/baseline_delta_R
-x_train=data
+x_train=no_signal
 
 # epochs=2000
 # hidden_dim=256
@@ -30,7 +30,7 @@ x_train=data
 # data_dir=data/baseline_delta_R
 # #data_dir=data/extended1
 # x_train=CR
-wandb_group=signal_scan_baseline
+#wandb_group=signal_scan_baseline
 
 #config=signal_scan_config.txt
 
@@ -53,8 +53,13 @@ task_array=($(seq ${task_start} ${task_end}))
 for i in ${task_array[@]}; do
 
     echo "task_id: ${i}"
-    n_sig=$(awk -v ArrayTaskID=$i '$1==ArrayTaskID {print $2}' $config)
-    seed=$(awk -v ArrayTaskID=$i '$1==ArrayTaskID {print $3}' $config)
+    n_sig=1000
+    seed=0
+    #n_sig=$(awk -v ArrayTaskID=$i '$1==ArrayTaskID {print $2}' $config)
+    #seed=$(awk -v ArrayTaskID=$i '$1==ArrayTaskID {print $3}' $config)
+
+    echo "n_sig: ${n_sig}"
+    echo "seed: ${seed}"
 
     wandb_run_name=seed_${seed}
     wandb_job_type=nsig_${n_sig}
@@ -81,14 +86,22 @@ for i in ${task_array[@]}; do
     echo "doing baseline task: ${n_sig} ${x_train} on node: ${node}"
     echo "n_sig: ${n_sig}"
     echo "seed: ${seed}"
+    # srun -n 1 -N 1 --exact --gpus-per-task=1 shifter python -u scripts/flow_matching_baseline.py --n_sig=${n_sig} \
+    #     --epochs=${epochs} --batch_size=${batch_size} \
+    #     --data_dir=${data_dir} --wandb_group=${wandb_group} --wandb_run_name=${wandb_run_name} \
+    #     --hidden_dim=${hidden_dim} --wandb_job_type=${wandb_job_type} \
+    #     --num_blocks=${num_blocks} --wandb --device=cuda:0  \
+    #     --time_frequencies=3  --context_frequencies=${frequencies} --seed=${seed} --resample \
+    #     --non_linear_context --sample_interpolated --scaled_mass \
+    #     --x_train=${x_train} &>./results/${wandb_run_name}_${n_sig}.out &
 
 
-    srun --nodelist=${node} -n 1 -N 1 --exact --gpus-per-task=1 shifter python -u scripts/flow_matching_baseline.py --n_sig=${n_sig} \
+    srun -n 1 -N 1 --exact --gpus-per-task=1 shifter python -u scripts/flow_matching_no_embedding.py --n_sig=${n_sig} \
         --epochs=${epochs} --batch_size=${batch_size} \
         --data_dir=${data_dir} --wandb_group=${wandb_group} --wandb_run_name=${wandb_run_name} \
         --hidden_dim=${hidden_dim} --wandb_job_type=${wandb_job_type} \
         --num_blocks=${num_blocks} --wandb --device=cuda:0  \
-        --time_frequencies=3  --context_frequencies=${frequencies} --seed=${seed} --resample --baseline \
+        --time_frequencies=3  --context_frequencies=${frequencies} --seed=${seed} --resample \
         --non_linear_context --sample_interpolated --scaled_mass \
         --x_train=${x_train} &>./results/${wandb_run_name}_${n_sig}.out &
 

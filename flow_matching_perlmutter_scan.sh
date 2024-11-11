@@ -14,7 +14,7 @@
 #SBATCH --error=slurm/error/fm_ranode_scan_blocks_%a.err
 
 
-epochs=2000
+epochs=2
 hidden_dim=256
 batch_size=4096
 num_blocks=4

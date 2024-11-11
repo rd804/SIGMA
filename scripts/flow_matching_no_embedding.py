@@ -239,15 +239,14 @@ for i in range(1):
         if not args.x_train == 'CR':
             # print('no context embedding')
             print('Model with continuous mass embedding')
-            model = Conditional_ResNet(context_frequencies=args.context_frequencies,
-                                    time_frequencies=args.time_frequencies, 
-                                    context_features=1, 
-                                    input_dim=n_features, device=device,
-                                    hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
-                                    use_batch_norm=True, 
-                                    dropout_probability=0.2,
-                                    non_linear_context=args.non_linear_context)
-            
+            model = Conditional_ResNet_time_embed(frequencies=args.time_frequencies, 
+                                context_features=1, 
+                                input_dim=n_features, device=device,
+                                hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
+                                use_batch_norm=True, 
+                                dropout_probability=0.2,
+                                non_linear_context=args.non_linear_context)
+
         elif args.x_train == 'CR':
             print('Since we are training CR, model without continuous mass embedding is used')
             model = Conditional_ResNet_time_embed(frequencies=args.time_frequencies, 
@@ -362,13 +361,13 @@ if args.sample_interpolated:
     ensembled_mass = []
 
     if not args.context_embedding:
-        interp_model = Conditional_ResNet_linear_interpolation(context_frequencies=args.context_frequencies,
-                                    time_frequencies=args.time_frequencies, 
-                                    context_features=1, 
-                                        input_dim=n_features, device=device,
-                                        hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
-                                        use_batch_norm=True, 
-                                        dropout_probability=0.2)
+        interp_model = Conditional_ResNet_time_embed_linear_interpolation(frequencies=args.time_frequencies, 
+                                context_features=1, 
+                                input_dim=n_features, device=device,
+                                hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
+                                use_batch_norm=True, 
+                                dropout_probability=0.2,
+                                non_linear_context=args.non_linear_context)
     else:
         interp_model = Discrete_Conditional_ResNet_linear_interpolation(frequencies=args.time_frequencies,
                                  context_features=1, 

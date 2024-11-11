@@ -2,7 +2,9 @@
 
 output_file="signal_scan_config.txt"
 
-n_sig=(3000 2000 1500 1000 750 500 450 300)
+#n_sig=(3000 2000 1500 1000 750 500 450 300)
+n_sig=(1000)
+#tries=(0)
 tries=(0 1 2 3 4 5 6 7 8 9)
 
 printf "%-15s %-15s %-15s\n" "ArrayTaskID" "n_sig" "tries" > "$output_file"
