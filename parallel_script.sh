@@ -12,27 +12,27 @@ total_tasks=$SLURM_NTASKS
 echo "Total tasks: ${total_tasks}"
 echo "Tasks per node: ${tasks_per_node}"
 
+## for sbi
+# epochs=2000
+# hidden_dim=256
+# batch_size=4096
+# num_blocks=4
+# wandb_group=mx_100_my_500
+# frequencies=9
+# data_dir=data/mx_100_my_500
+# x_train=CR
 
 epochs=2000
 hidden_dim=256
+frequencies=9
 batch_size=4096
 num_blocks=4
-wandb_group=no_signal_no_embed
-frequencies=9
 data_dir=data/baseline_delta_R
-x_train=no_signal
+#data_dir=data/extended1
+x_train=data
+wandb_group=signal_scan_baseline
 
-# epochs=2000
-# hidden_dim=256
-# frequencies=3
-# batch_size=4096
-# num_blocks=4
-# data_dir=data/baseline_delta_R
-# #data_dir=data/extended1
-# x_train=CR
-#wandb_group=signal_scan_baseline
-
-#config=signal_scan_config.txt
+config=signal_scan_config.txt
 
 task_start=$1
 task_end=$((task_start+63))
@@ -86,17 +86,7 @@ for i in ${task_array[@]}; do
     echo "doing baseline task: ${n_sig} ${x_train} on node: ${node}"
     echo "n_sig: ${n_sig}"
     echo "seed: ${seed}"
-    # srun -n 1 -N 1 --exact --gpus-per-task=1 shifter python -u scripts/flow_matching_baseline.py --n_sig=${n_sig} \
-    #     --epochs=${epochs} --batch_size=${batch_size} \
-    #     --data_dir=${data_dir} --wandb_group=${wandb_group} --wandb_run_name=${wandb_run_name} \
-    #     --hidden_dim=${hidden_dim} --wandb_job_type=${wandb_job_type} \
-    #     --num_blocks=${num_blocks} --wandb --device=cuda:0  \
-    #     --time_frequencies=3  --context_frequencies=${frequencies} --seed=${seed} --resample \
-    #     --non_linear_context --sample_interpolated --scaled_mass \
-    #     --x_train=${x_train} &>./results/${wandb_run_name}_${n_sig}.out &
-
-
-    srun -n 1 -N 1 --exact --gpus-per-task=1 shifter python -u scripts/flow_matching_no_embedding.py --n_sig=${n_sig} \
+    srun -n 1 -N 1 --exact --gpus-per-task=1 shifter python -u scripts/flow_matching_baseline.py --n_sig=${n_sig} \
         --epochs=${epochs} --batch_size=${batch_size} \
         --data_dir=${data_dir} --wandb_group=${wandb_group} --wandb_run_name=${wandb_run_name} \
         --hidden_dim=${hidden_dim} --wandb_job_type=${wandb_job_type} \
@@ -104,6 +94,17 @@ for i in ${task_array[@]}; do
         --time_frequencies=3  --context_frequencies=${frequencies} --seed=${seed} --resample \
         --non_linear_context --sample_interpolated --scaled_mass \
         --x_train=${x_train} &>./results/${wandb_run_name}_${n_sig}.out &
+
+# for sbi
+    # srun -n 1 -N 1 --exact --gpus-per-task=1 shifter python -u scripts/flow_matching_baseline.py --n_sig=${n_sig} \
+    #     --epochs=${epochs} --batch_size=${batch_size} \
+    #     --data_dir=${data_dir} --wandb_group=${wandb_group} --wandb_run_name=${wandb_run_name} \
+    #     --hidden_dim=${hidden_dim} --wandb_job_type=${wandb_job_type} \
+    #     --num_blocks=${num_blocks} --wandb --device=cuda:0  \
+    #     --time_frequencies=3  --context_frequencies=${frequencies} --seed=${seed} --resample \
+    #     --x_train=${x_train} &>./results/${wandb_run_name}_${n_sig}.out &
+
+        #--non_linear_context --sample_interpolated --scaled_mass \
 
     if [ $i -eq $task_end ]; then
         echo "Waiting for final set of tasks to finish"

@@ -24,17 +24,19 @@ import sys
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 #os.environ["CUDA_VISIBLE_DEVICES"]='2'
+from scipy.stats import rv_histogram
 
 
 
 #device = torch.device(f'cuda:{local_rank}' if CUDA else "cpu")   
 device = torch.device('cuda:0')
-data_dir = 'data/baseline_delta_R'
-model_path = 'results/debugging_nflow_interp/nonlin_embed_2000/base_dR_data'
+#data_dir = 'data/baseline_delta_R'
+#model_path = 'results/debugging_nflow_interp/nonlin_embed_2000/base_dR_data'
+data_dir='data/mx_100_my_500'
+model_path='results//mx_100_my_500/nsig_1000/seed_0/'
 
 
-
-SR_data, CR_data , true_w, sigma = resample_split(data_dir, n_sig = 2000, resample_seed = 1,resample = False)
+SR_data, CR_data , true_w, sigma = resample_split(data_dir, n_sig = 1000, resample_seed = 0,resample = False)
 
 
 print('x_train shape', CR_data.shape)
@@ -57,24 +59,43 @@ x_test = preprocess_params_transform(_x_test, pre_parameters)
 x_SR = preprocess_params_transform(SR_data, pre_parameters)
 
 
-model = Conditional_ResNet(frequencies=3, 
-                            context_features=1, 
-                        input_dim=n_features, device=device,
-                        hidden_dim=256, num_blocks=4, 
-                        use_batch_norm=True, 
-                        dropout_probability=0.2,
-                        non_linear_context=True)
+# model = Conditional_ResNet(frequencies=3, 
+#                             context_features=1, 
+#                         input_dim=n_features, device=device,
+#                         hidden_dim=256, num_blocks=4, 
+#                         use_batch_norm=True, 
+#                         dropout_probability=0.2,
+#                         non_linear_context=True)
+
+model = Conditional_ResNet_time_embed(frequencies=3, 
+                                context_features=1, 
+                                input_dim=n_features, device=device,
+                                hidden_dim=256, num_blocks=4, 
+                                use_batch_norm=True, 
+                                dropout_probability=0.2,
+                                non_linear_context=False)
+
+SR_mass = SR_data[:,0]
+SR_hist = np.histogram(SR_mass, bins=60, density=True)
+SR_density = rv_histogram(SR_hist)
+
+noise = torch.randn(2_000_000, n_features).to(device).float()
+mass_samples_SR = SR_density.rvs(size=len(noise))
+mass_samples_SR = mass_samples_SR.reshape(-1,1)
+mass = torch.from_numpy(mass_samples_SR).to(device).float()
 
 
-mass = torch.from_numpy(SR_data[:,0].reshape(-1,1)).to(device).float()
-data = torch.from_numpy(SR_data[:,1:-1]).to(device).float()
-noise1 = torch.randn_like(data).to(device).float()
-noise2 = torch.randn_like(data).to(device).float()
-noise3 = torch.randn_like(data).to(device).float()
+# mass = torch.from_numpy(SR_data[:,0].reshape(-1,1)).to(device).float()
+# data = torch.from_numpy(SR_data[:,1:-1]).to(device).float()
+# noise1 = torch.randn_like(data).to(device).float()
+# noise2 = torch.randn_like(data).to(device).float()
+# noise3 = torch.randn_like(data).to(device).float()
+# noise4 = torch.randn_like(data).to(device).float()
+# noise5 = torch.randn_like(data).to(device).float()
 
-noise = torch.cat([noise1, noise2], dim=0)
-noise = torch.cat([noise, noise3], dim=0)
-mass = torch.cat([mass, mass, mass], dim=0)
+# noise = torch.cat([noise1, noise2], dim=0)
+# noise = torch.cat([noise, noise3], dim=0)
+# mass = torch.cat([mass, mass, mass], dim=0)
 
 mini_batch_length = len(noise)//10
 
@@ -107,7 +128,9 @@ samples = torch.concat([samples, torch.ones(samples.shape[0],1).to(device)], axi
 pre_parameters_gpu = {key: torch.tensor(value).to(device) for key, value in pre_parameters.items()}
 
 samples_inverse = inverse_transform(samples, pre_parameters_gpu)
+print(samples_inverse.shape)
 
+np.save(f'{model_path}/2M_samples.npy', samples_inverse.cpu().detach().numpy())
 
 for i in range(1,n_features+1,1):
     figure = plt.figure()

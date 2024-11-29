@@ -56,6 +56,10 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+wandb
+scripts/compare_interpolation_methods_mlp.py
+scripts/compare_interpolation_methods_no_embedding.py
+scripts/compare_interpolation_methods.py
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -202,3 +206,15 @@ ANODE_sigonly_working.py
 Significance_vs_nsig_Ranode_approx_BDT.png
 Significance_vs_nsig_Ranode_BDT.png
 Significance_vs_nsig.png
+
+
+*.sh
+!submit_jobs.sh
+!parallel_script.sh
+!create_config_file.sh
+!signal_scan_config.txt
+resnet_interpolation.pdf
+
+scripts/*.py
+!/scripts/flow_matching_baseline.py
+

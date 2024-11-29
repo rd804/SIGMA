@@ -8,7 +8,7 @@
 #SBATCH --qos=shared
 #SBATCH --requeue 
 #SBATCH --gres=gpu:1
-#SBATCH --array=0-79
+##SBATCH --array=0-79
 #SBATCH --job-name=fm_interp
 #SBATCH --output=slurm/output/fm_ranode_scan_blocks_%a.out
 #SBATCH --error=slurm/error/fm_ranode_scan_blocks_%a.err
@@ -20,13 +20,17 @@ batch_size=4096
 num_blocks=4
 wandb_group=signal_scan
 frequencies=9
-data_dir=data/baseline_delta_R
-x_train=data
+data_dir=data/mx_100_my_500
+x_train=CR
           
 config=signal_scan_config.txt
 
-n_sig=$(awk -v ArrayTaskID=$SLURM_ARRAY_TASK_ID '$1==ArrayTaskID {print $2}' $config)
-seed=$(awk -v ArrayTaskID=$SLURM_ARRAY_TASK_ID '$1==ArrayTaskID {print $3}' $config)
+n_sig=1000
+seed=0
+
+
+#n_sig=$(awk -v ArrayTaskID=$SLURM_ARRAY_TASK_ID '$1==ArrayTaskID {print $2}' $config)
+#seed=$(awk -v ArrayTaskID=$SLURM_ARRAY_TASK_ID '$1==ArrayTaskID {print $3}' $config)
 
 wandb_run_name=seed_${seed}
 wandb_job_type=nsig_${n_sig}
