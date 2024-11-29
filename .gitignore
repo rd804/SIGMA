@@ -17,8 +17,6 @@ slurm
 slurm-*
 # Distribution / packaging
 scripts/w_scan.py
-notebooks
-notebooks/*
 data/*
 figures/*
 models/*
@@ -217,4 +215,7 @@ resnet_interpolation.pdf
 
 scripts/*.py
 !/scripts/flow_matching_baseline.py
+notebooks/*
+!notebooks/compile_sic.ipynb
+#notebooks
 
