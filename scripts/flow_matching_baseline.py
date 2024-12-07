@@ -362,6 +362,7 @@ if args.sample_interpolated:
     ensembled_mass = []
 
     if not args.context_embedding:
+        # context_interp
         interp_model = Conditional_ResNet_linear_interpolation(context_frequencies=args.context_frequencies,
                                     time_frequencies=args.time_frequencies, 
                                     context_features=1, 
@@ -369,6 +370,9 @@ if args.sample_interpolated:
                                         hidden_dim=args.hidden_dim, num_blocks=args.num_blocks, 
                                         use_batch_norm=True, 
                                         dropout_probability=0.2)
+        
+        # for linear_interp
+        # Conditional_ResNet_time_embed_vector_interpolation
     else:
         interp_model = Discrete_Conditional_ResNet_linear_interpolation(frequencies=args.time_frequencies,
                                  context_features=1, 
@@ -568,3 +572,4 @@ np.save(f'{save_path}predict_cathode.npy', predict_cathode)
 
 #     for i in range(100):
 #         wandb.log({'SIC_iad': sics_iad[i], 'SIC_cathode': sics_cathode[i]}, step=tprs[i]) 
+# %%

@@ -30,7 +30,8 @@ num_blocks=4
 data_dir=data/baseline_delta_R
 #data_dir=data/extended1
 x_train=data
-wandb_group=signal_scan_baseline
+# x_train=CR
+wandb_group=signal_scan
 
 config=signal_scan_config.txt
 
@@ -53,10 +54,10 @@ task_array=($(seq ${task_start} ${task_end}))
 for i in ${task_array[@]}; do
 
     echo "task_id: ${i}"
-    n_sig=1000
-    seed=0
-    #n_sig=$(awk -v ArrayTaskID=$i '$1==ArrayTaskID {print $2}' $config)
-    #seed=$(awk -v ArrayTaskID=$i '$1==ArrayTaskID {print $3}' $config)
+    #n_sig=1000
+    #seed=0
+    n_sig=$(awk -v ArrayTaskID=$i '$1==ArrayTaskID {print $2}' $config)
+    seed=$(awk -v ArrayTaskID=$i '$1==ArrayTaskID {print $3}' $config)
 
     echo "n_sig: ${n_sig}"
     echo "seed: ${seed}"
